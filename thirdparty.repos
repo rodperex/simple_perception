@@ -1,0 +1,9 @@
+repositories:
+  thirdparty/yolo_ros:
+    type: git
+    url: https://github.com/mgonzs13/yolo_ros.git
+    version: humble
+  thirdparty/depth_anything_v2_ros2:
+    type: git
+    url: https://github.com/grupo-avispa/depth_anything_v2_ros2.git
+    version: main

@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+# Copyright 2025 Rodrigo Pérez-Rodríguez
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+import rclpy
+from rclpy.node import Node
+from vision_msgs.msg import Detection2DArray
+from geometry_msgs.msg import PointStamped
+from tf2_ros import Buffer, TransformListener
+from geometry_msgs.msg import TransformStamped
+from tf2_geometry_msgs import do_transform_point
+from tf2_ros import TransformBroadcaster
+from sensor_msgs.msg import CameraInfo
+import math
+
+
+class EntityTracker(Node):
+    def __init__(self):
+        super().__init__('entity_tracker_node')
+
+        self.declare_parameter('target_class', 'person')
+        self.declare_parameter('source_frame', 'base_link')
+        self.declare_parameter('target_frame', 'target')
+        self.declare_parameter('optical_frame', 'CameraTop_optical_frame')
+        
+        self.target_class = self.get_parameter('target_class').value
+        self.source_frame = self.get_parameter('source_frame').value
+        self.target_frame = self.get_parameter('target_frame').value
+        self.optical_frame = self.get_parameter('optical_frame').value
+        self.get_logger().info(f'Tracking target class: {self.target_class}')
+        
+        # Add parameter callback to allow runtime changes
+        self.add_on_set_parameters_callback(self.parameter_callback)
+        
+        self.configured = False
+
+        # self.tf_buffer = Buffer()
+        self.tf_buffer = Buffer(cache_time=rclpy.duration.Duration(seconds=3))
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        self.sub = self.create_subscription(
+            Detection2DArray,
+            'input_detection_2d',
+            self.detection_callback,
+            rclpy.qos.qos_profile_sensor_data
+        )
+
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo,
+            'camera_info',
+            self.camera_info_callback,
+            rclpy.qos.qos_profile_sensor_data
+        )
+
+    def parameter_callback(self, params):
+        """Callback for parameter changes at runtime."""
+        from rcl_interfaces.msg import SetParametersResult
+        
+        for param in params:
+            if param.name == 'target_class':
+                self.target_class = param.value
+                self.get_logger().info(f'Target class changed to: {self.target_class}')
+        
+        return SetParametersResult(successful=True)
+
+    def camera_info_callback(self, msg: CameraInfo):
+        # The intrinsic matrix K is a 9-element array (row-major order)
+        # K = [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+        self.f_x = msg.k[0] # fx is K[0]
+        self.c_x = msg.k[2] # cx is K[2]
+
+        self.current_image_size = (msg.width, msg.height)
+        self.get_logger().info(f'Got image of size: {msg.width}x{msg.height}')
+        self.get_logger().info(f'Got camera intrinsics: fx={self.f_x:.2f}, cx={self.c_x:.2f}')
+        self.configured = True
+        self.destroy_subscription(self.camera_info_sub)
+
+    def detection_callback(self, msg: Detection2DArray):
+        if not self.configured:
+            self.get_logger().warn('Camera info not yet received, cannot compute angles')
+            return
+            
+        if not msg.detections:
+            return
+
+        # Find first detection of the target class
+        for detection in msg.detections:
+            if detection.results and detection.results[0].hypothesis.class_id == self.target_class:
+                self.publish_target_tf(detection)
+                break
+
+    def publish_target_tf(self, detection):
+
+        if not self.configured:
+            self.get_logger().warn('Camera info not yet received, cannot compute angles')
+            return
+        
+        # Calculate angle relative to image center using camera intrinsics
+        x_pixel = detection.bbox.center.position.x
+        
+        
+        pixel_offset_x = x_pixel - self.c_x
+        angle = math.atan(pixel_offset_x / self.f_x)
+        
+        self.get_logger().debug(f'Detected {self.target_class} at angle {math.degrees(angle):.1f} degrees ({self.optical_frame})')
+
+        # Create a point at 1m distance based on the computed angle
+        x_optical = math.tan(angle)
+        y_optical = 0.0  
+        z_optical = 1.0  # Fixed distance of 1 meter
+
+        target_point = PointStamped()
+        target_point.header = detection.header
+        target_point.point.x = x_optical
+        target_point.point.y = y_optical
+        target_point.point.z = z_optical
+
+        detection_time = detection.header.stamp
+        detection_frame = self.optical_frame
+
+        try:
+            # Lookup the transform
+            self.get_logger().debug(f'Looking up transform from {self.source_frame} to {detection_frame}')
+            source_2_detection = self.tf_buffer.lookup_transform(
+                self.source_frame,
+                detection_frame,
+                rclpy.time.Time() 
+            )
+
+            transformed_point = do_transform_point(target_point, source_2_detection)
+        except Exception as e:
+            self.get_logger().error(f'Transform error: {e}')
+            return
+
+        transform = TransformStamped()
+        transform.header.stamp = self.get_clock().now().to_msg()
+        transform.header.frame_id = self.source_frame
+        transform.child_frame_id = self.target_frame
+        transform.transform.translation.x = transformed_point.point.x
+        transform.transform.translation.y = transformed_point.point.y
+        transform.transform.translation.z = transformed_point.point.z
+        transform.transform.rotation.x = 0.0
+        transform.transform.rotation.y = 0.0
+        transform.transform.rotation.z = 0.0
+        transform.transform.rotation.w = 1.0
+
+        angle = math.atan2(transformed_point.point.y, transformed_point.point.x)
+        self.get_logger().info(f'Target {self.target_class} @ angle {math.degrees(angle):.1f}° -> position ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f}) in {self.source_frame}')
+
+        self.get_logger().debug(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
+        self.tf_broadcaster.sendTransform(transform)
+        
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = EntityTracker()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
