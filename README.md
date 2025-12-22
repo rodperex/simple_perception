@@ -4,6 +4,12 @@ Simple perception utilities for object tracking and detection format conversion.
 
 ## Overview
 
+This repository contains two ROS 2 packages:
+- **simple_perception**: Perception nodes for object tracking and detection
+- **simple_perception_interfaces**: Custom message and service definitions
+
+### simple_perception
+
 This package provides ROS 2 nodes for:
 - **Entity tracking**: Track objects detected by YOLO and publish TF transforms
 - **Detection conversion**: Convert YOLO detection messages to standard vision_msgs format
@@ -120,11 +126,11 @@ cd ~/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-Then build the package:
+Then build the packages:
 
 ```bash
 cd ~/ros2_ws
-colcon build --packages-select simple_perception
+colcon build --packages-select simple_perception_interfaces simple_perception
 source install/setup.bash
 ```
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2025 Rodrigo Pérez-Rodríguez
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,13 +12,13 @@
 
 import rclpy
 from rclpy.node import Node
-from vision_msgs.msg import Detection2DArray
+from vision_msgs.msg import Detection3DArray
 from geometry_msgs.msg import PointStamped
 from tf2_ros import Buffer, TransformListener
 from geometry_msgs.msg import TransformStamped
 from tf2_geometry_msgs import do_transform_point
 from tf2_ros import TransformBroadcaster
-from sensor_msgs.msg import CameraInfo
+from simple_perception_interfaces.srv import SetTargetClass
 import math
 
 
@@ -30,37 +29,34 @@ class EntityTracker(Node):
         self.declare_parameter('target_class', 'person')
         self.declare_parameter('source_frame', 'base_link')
         self.declare_parameter('target_frame', 'target')
-        self.declare_parameter('optical_frame', 'CameraTop_optical_frame')
         
         self.target_class = self.get_parameter('target_class').value
         self.source_frame = self.get_parameter('source_frame').value
         self.target_frame = self.get_parameter('target_frame').value
-        self.optical_frame = self.get_parameter('optical_frame').value
         self.get_logger().info(f'Tracking target class: {self.target_class}')
         
         # Add parameter callback to allow runtime changes
         self.add_on_set_parameters_callback(self.parameter_callback)
-        
-        self.configured = False
 
-        # self.tf_buffer = Buffer()
-        self.tf_buffer = Buffer(cache_time=rclpy.duration.Duration(seconds=3))
+        self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = TransformBroadcaster(self)
 
+        # Subscriber to Detection3DArray
         self.sub = self.create_subscription(
-            Detection2DArray,
-            'input_detection_2d',
+            Detection3DArray,
+            'input_detection_3d',
             self.detection_callback,
             rclpy.qos.qos_profile_sensor_data
         )
 
-        self.camera_info_sub = self.create_subscription(
-            CameraInfo,
-            'camera_info',
-            self.camera_info_callback,
-            rclpy.qos.qos_profile_sensor_data
+        # Create service to set target class
+        self.set_target_class_service = self.create_service(
+            SetTargetClass,
+            'set_perception_target',
+            self.set_target_class_callback
         )
+        self.get_logger().info('Service /set_perception_target is ready')
 
     def parameter_callback(self, params):
         """Callback for parameter changes at runtime."""
@@ -73,23 +69,21 @@ class EntityTracker(Node):
         
         return SetParametersResult(successful=True)
 
-    def camera_info_callback(self, msg: CameraInfo):
-        # The intrinsic matrix K is a 9-element array (row-major order)
-        # K = [fx, 0, cx, 0, fy, cy, 0, 0, 1]
-        self.f_x = msg.k[0] # fx is K[0]
-        self.c_x = msg.k[2] # cx is K[2]
+    def set_target_class_callback(self, request, response):
+        """Service callback to set the target class."""
+        try:
+            self.target_class = request.target_class
+            self.get_logger().info(f'Target class changed via service to: {self.target_class}')
+            response.success = True
+            response.message = f'Target class successfully set to: {self.target_class}'
+        except Exception as e:
+            self.get_logger().error(f'Failed to set target class: {str(e)}')
+            response.success = False
+            response.message = f'Failed to set target class: {str(e)}'
+        
+        return response
 
-        self.current_image_size = (msg.width, msg.height)
-        self.get_logger().info(f'Got image of size: {msg.width}x{msg.height}')
-        self.get_logger().info(f'Got camera intrinsics: fx={self.f_x:.2f}, cx={self.c_x:.2f}')
-        self.configured = True
-        self.destroy_subscription(self.camera_info_sub)
-
-    def detection_callback(self, msg: Detection2DArray):
-        if not self.configured:
-            self.get_logger().warn('Camera info not yet received, cannot compute angles')
-            return
-            
+    def detection_callback(self, msg: Detection3DArray):
         if not msg.detections:
             return
 
@@ -101,32 +95,14 @@ class EntityTracker(Node):
 
     def publish_target_tf(self, detection):
 
-        if not self.configured:
-            self.get_logger().warn('Camera info not yet received, cannot compute angles')
-            return
-        
-        # Calculate angle relative to image center using camera intrinsics
-        x_pixel = detection.bbox.center.position.x
-        
-        
-        pixel_offset_x = x_pixel - self.c_x
-        angle = math.atan(pixel_offset_x / self.f_x)
-        
-        self.get_logger().debug(f'Detected {self.target_class} at angle {math.degrees(angle):.1f} degrees ({self.optical_frame})')
-
-        # Create a point at 1m distance based on the computed angle
-        x_optical = math.tan(angle)
-        y_optical = 0.0  
-        z_optical = 1.0  # Fixed distance of 1 meter
-
         target_point = PointStamped()
         target_point.header = detection.header
-        target_point.point.x = x_optical
-        target_point.point.y = y_optical
-        target_point.point.z = z_optical
+        target_point.point.x = detection.bbox.center.position.x
+        target_point.point.y = detection.bbox.center.position.y
+        target_point.point.z = detection.bbox.center.position.z
 
         detection_time = detection.header.stamp
-        detection_frame = self.optical_frame
+        detection_frame = detection.header.frame_id
 
         try:
             # Lookup the transform
@@ -134,7 +110,8 @@ class EntityTracker(Node):
             source_2_detection = self.tf_buffer.lookup_transform(
                 self.source_frame,
                 detection_frame,
-                rclpy.time.Time() 
+                detection_time,  # Use the actual timestamp from the sensor data
+                timeout=rclpy.duration.Duration(seconds=0.5) 
             )
 
             transformed_point = do_transform_point(target_point, source_2_detection)
@@ -154,10 +131,7 @@ class EntityTracker(Node):
         transform.transform.rotation.z = 0.0
         transform.transform.rotation.w = 1.0
 
-        angle = math.atan2(transformed_point.point.y, transformed_point.point.x)
-        self.get_logger().info(f'Target {self.target_class} @ angle {math.degrees(angle):.1f}° -> position ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f}) in {self.source_frame}')
-
-        self.get_logger().debug(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
+        self.get_logger().info(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
         self.tf_broadcaster.sendTransform(transform)
         
 

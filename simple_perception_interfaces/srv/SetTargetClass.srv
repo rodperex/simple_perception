@@ -1,0 +1,6 @@
+# Request
+string target_class
+---
+# Response
+bool success
+string message
