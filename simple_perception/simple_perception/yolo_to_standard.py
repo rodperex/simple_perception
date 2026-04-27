@@ -46,6 +46,7 @@ class Yolo2Standard(Node):
         detection_array_msg.header = msg.header
 
         for detection in msg.detections:
+            self.get_logger().debug(f'Processing 2D detection of class "{detection.class_name}" with score {detection.score:.2f}')
             detection_msg = Detection2D()
             detection_msg.header = msg.header
 
@@ -61,6 +62,7 @@ class Yolo2Standard(Node):
             detection_msg.results.append(obj_msg)
             detection_array_msg.detections.append(detection_msg)
 
+        self.get_logger().debug(f'Publishing {len(detection_array_msg.detections)} 2D detections')
         self.detection2d_pub.publish(detection_array_msg)
 
     def detection3d_callback(self, msg: DetectionArray):
@@ -68,6 +70,7 @@ class Yolo2Standard(Node):
         detection_array_msg.header = msg.header
 
         for detection in msg.detections:
+            self.get_logger().debug(f'Processing 3D detection of class "{detection.class_name}" with score {detection.score:.2f}')
             detection_msg = Detection3D()
             detection_msg.header = msg.header
             detection_msg.header.frame_id = detection.bbox3d.frame_id
@@ -97,6 +100,7 @@ class Yolo2Standard(Node):
             detection_msg.results.append(obj_msg)
             detection_array_msg.detections.append(detection_msg)
 
+        self.get_logger().debug(f'Publishing {len(detection_array_msg.detections)} 3D detections')
         self.detection3d_pub.publish(detection_array_msg)
 
 def main(args=None):
