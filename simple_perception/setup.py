@@ -26,6 +26,8 @@ setup(
         'console_scripts': [
             'entity_tracker = simple_perception.entity_tracker:main',
             'entity_tracker_fake_3d = simple_perception.entity_tracker_fake_3d:main',
+            'entity_tracker_monocular_3d = simple_perception.entity_tracker_monocular_3d:main',
+            'depth_calibration_helper = simple_perception.depth_calibration_helper:main',
             'yolo_to_standard = simple_perception.yolo_to_standard:main',
         ],
     },

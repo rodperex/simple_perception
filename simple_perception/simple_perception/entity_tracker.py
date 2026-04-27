@@ -131,7 +131,9 @@ class EntityTracker(Node):
         transform.transform.rotation.z = 0.0
         transform.transform.rotation.w = 1.0
 
-        self.get_logger().info(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
+        self.get_logger().info(f'Target {self.target_class} @ angle {math.degrees(angle):.1f}° -> position ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f}) in {self.source_frame}')
+
+        self.get_logger().debug(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
         self.tf_broadcaster.sendTransform(transform)
         
 

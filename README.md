@@ -34,6 +34,28 @@ Tracks entities using 2D detections and estimates 3D position using camera param
 - `/tf` (tf2_msgs/TFMessage): Target transform
 
 ### entity_tracker
+### entity_tracker_monocular_3d
+Tracks entities using 2D detections and monocular depth estimation to compute 3D positions (calibrated from relative depth).
+
+**Parameters:**
+- `target_class` (string, default: "person"): Class of object to track
+- `source_frame` (string, default: "base_link"): Base frame for tracking
+- `target_frame` (string, default: "target"): TF frame name for tracked target
+- `optical_frame` (string, default: "CameraTop_optical_frame"): Camera optical frame
+- `depth_scale_factor` (float, default: 1.0): Manual depth scaling (optional)
+- `reference_distance` (float, default: 1.0): Known distance for calibration (meters)
+- `reference_depth_value` (float, default: 1.0): Depth value at reference distance
+- `min_depth` (float, default: 0.3): Minimum valid depth (meters)
+- `max_depth` (float, default: 10.0): Maximum valid depth (meters)
+- `use_bbox_center` (bool, default: True): Use bbox center (True) or median (False) for depth
+
+**Subscribed Topics:**
+- `/input_detection_2d` (vision_msgs/Detection2DArray): 2D detections
+- `/depth_image` (sensor_msgs/Image): Relative depth image
+- `/camera_info` (sensor_msgs/CameraInfo): Camera calibration
+
+**Published Topics:**
+- `/tf` (tf2_msgs/TFMessage): Target transform
 Tracks entities using 3D detections.
 
 **Parameters:**
@@ -61,6 +83,18 @@ Converts YOLO detection messages to standard vision_msgs format.
 ## Launch Files
 
 ### simple_perception.launch.py
+### entity_tracker_monocular_3d.launch.py
+Launches the monocular 3D entity tracker node with all calibration and remapping parameters.
+
+**Arguments:**
+- `target_class`, `source_frame`, `target_frame`, `optical_frame`, `detection_topic`, `depth_topic`, `camera_info_topic`, `depth_scale_factor`, `reference_distance`, `reference_depth_value`, `min_depth`, `max_depth`, `use_bbox_center` (see node above)
+
+**Usage:**
+```bash
+ros2 launch simple_perception entity_tracker_monocular_3d.launch.py \
+    reference_distance:=1.5 \
+    reference_depth_value:=0.85
+```
 Launches the complete perception stack including YOLO detector, detection converter, and entity tracker.
 
 **Arguments:**
@@ -81,6 +115,11 @@ ros2 launch simple_perception simple_perception.launch.py
 
 # Use real 3D tracker
 ros2 launch simple_perception simple_perception.launch.py fake_3d:=false
+
+# Use monocular 3D tracker (calibrated)
+ros2 launch simple_perception entity_tracker_monocular_3d.launch.py \
+    reference_distance:=1.5 \
+    reference_depth_value:=0.85
 
 # Custom configuration
 ros2 launch simple_perception simple_perception.launch.py \

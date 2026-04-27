@@ -136,7 +136,7 @@ class EntityTracker(Node):
         angle = math.atan(pixel_offset_x / self.f_x)
         
         self.get_logger().debug(f'Detected {self.target_class} at angle {math.degrees(angle):.1f} degrees ({self.optical_frame})')
-
+        
         # Create a point at 1m distance based on the computed angle
         x_optical = math.tan(angle)
         y_optical = 0.0  
