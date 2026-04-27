@@ -81,10 +81,11 @@ def generate_launch_description():
     detection_3d_topic_arg = DeclareLaunchArgument(
         'detection_3d_topic',
         default_value=PythonExpression([
-            "'/simulated_detection_3d' if ",
-            'str(', LaunchConfiguration('use_monocular'), ") == 'true' else '/detections_3d'"
+            "'/simulated_detection_3d' if '", # Added opening quote
+            LaunchConfiguration('use_monocular'),
+            "' == 'true' else '/detections_3d'" # Added closing quote
         ]),
-        description='Input Detection3DArray topic for entity_tracker (default: /detections_3d, or /simulated_detection_3d if use_monocular)'
+        description='Input Detection3DArray topic for entity_tracker'
     )
     
     # --- Other launch arguments ---
