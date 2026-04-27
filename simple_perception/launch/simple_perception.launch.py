@@ -53,6 +53,12 @@ def generate_launch_description():
 
     All arguments can be remapped from the command line.
     """
+
+    use_sim_time_arg = DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='true',
+            description='Use simulation (Gazebo) clock if true'
+        )
  
     # --- Argument: Use monocular depth pipeline ---
     use_monocular_arg = DeclareLaunchArgument(
@@ -92,7 +98,7 @@ def generate_launch_description():
     # --- Other launch arguments ---
     fake_3d_arg = DeclareLaunchArgument(
         'fake_3d',
-        default_value='true',
+        default_value='false',
         description='Use fake 3D tracker (true) or real 3D tracker (false)'
     )
 
@@ -155,6 +161,7 @@ def generate_launch_description():
             'target_class': LaunchConfiguration('target_class'),
             'source_frame': LaunchConfiguration('source_frame'),
             'target_frame': LaunchConfiguration('target_frame'),
+            'use_sim_time': LaunchConfiguration('use_sim_time')
         }],
         remappings=[
             ('input_detection_3d', LaunchConfiguration('detection_3d_topic')),
@@ -172,6 +179,7 @@ def generate_launch_description():
             'source_frame': LaunchConfiguration('source_frame'),
             'target_frame': LaunchConfiguration('target_frame'),
             'optical_frame': LaunchConfiguration('optical_frame'),
+            'use_sim_time': LaunchConfiguration('use_sim_time')
         }],
         remappings=[
             ('input_detection_2d', '/detections_2d'),
@@ -210,7 +218,7 @@ def generate_launch_description():
             'input_depth_topic': LaunchConfiguration('input_depth_topic'),
             'input_depth_info_topic': LaunchConfiguration('input_depth_info_topic'),
             'target_frame': LaunchConfiguration('camera_frame'),
-            'use_3d': 'False', # Set to False when using custom 3D processing
+            'use_3d': 'True', # Set to False when using custom 3D processing
             'depth_image_reliability': '1', # Set to 2 when monocular depth is used
         }.items()
     )
@@ -229,6 +237,7 @@ def generate_launch_description():
         camera_frame_arg,
         use_monocular_arg,
         detection_3d_topic_arg,
+        use_sim_time_arg,
 
         # Monocular pipeline (optional)
         monocular_pipeline,
