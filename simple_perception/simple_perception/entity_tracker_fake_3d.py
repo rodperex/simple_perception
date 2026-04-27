@@ -29,19 +29,21 @@ class EntityTracker(Node):
         super().__init__('entity_tracker_node')
 
         self.declare_parameter('target_class', 'person')
-        self.declare_parameter('source_frame', 'base_link')
+        self.declare_parameter('source_frame', 'odom')
         self.declare_parameter('target_frame', 'target')
         self.declare_parameter('optical_frame', 'CameraTop_optical_frame')
-        
+
         self.target_class = self.get_parameter('target_class').value
         self.source_frame = self.get_parameter('source_frame').value
         self.target_frame = self.get_parameter('target_frame').value
         self.optical_frame = self.get_parameter('optical_frame').value
         self.get_logger().info(f'Tracking target class: {self.target_class}')
-        
+
         # Add parameter callback to allow runtime changes
         self.add_on_set_parameters_callback(self.parameter_callback)
-        
+
+        self.enable_processing = self.target_class != "none"
+
         self.configured = False
 
         # self.tf_buffer = Buffer()
@@ -83,10 +85,16 @@ class EntityTracker(Node):
         return SetParametersResult(successful=True)
 
     def set_target_class_callback(self, request, response):
-        """Service callback to set the target class."""
+        """Service callback to set the target class and enable/disable detection processing."""
         try:
             self.target_class = request.target_class
             self.get_logger().info(f'Target class changed via service to: {self.target_class}')
+            if self.target_class != "none":
+                self.enable_processing = True
+                self.get_logger().info('Detection processing ENABLED')
+            else:
+                self.enable_processing = False
+                self.get_logger().info('Detection processing DISABLED')
             response.success = True
             response.message = f'Target class successfully set to: {self.target_class}'
         except Exception as e:
@@ -109,16 +117,28 @@ class EntityTracker(Node):
         self.destroy_subscription(self.camera_info_sub)
 
     def detection_callback(self, msg: Detection2DArray):
+        if not hasattr(self, 'enable_processing'):
+            self.enable_processing = False
+
+        if not self.enable_processing:
+            self.get_logger().debug('Detection processing DISABLED: target_class == "none" or not enabled.')
+            return
+
         if not self.configured:
             self.get_logger().warn('Camera info not yet received, cannot compute angles')
             return
-            
+
         if not msg.detections:
+            self.get_logger().debug('No detections in the message')
             return
+
+        self.get_logger().debug(f'Received {len(msg.detections)} detections, looking for class "{self.target_class}"')
 
         # Find first detection of the target class
         for detection in msg.detections:
+            self.get_logger().debug(f'Checking detection with class_id: {detection.results[0].hypothesis.class_id if detection.results else "None"}')
             if detection.results and detection.results[0].hypothesis.class_id == self.target_class:
+                self.get_logger().info(f'Detected target class "{self.target_class}" in image')
                 self.publish_target_tf(detection)
                 break
 
@@ -166,7 +186,8 @@ class EntityTracker(Node):
             return
 
         transform = TransformStamped()
-        transform.header.stamp = self.get_clock().now().to_msg()
+        # transform.header.stamp = self.get_clock().now().to_msg()
+        transform.header.stamp = detection_time
         transform.header.frame_id = self.source_frame
         transform.child_frame_id = self.target_frame
         transform.transform.translation.x = transformed_point.point.x
@@ -180,7 +201,7 @@ class EntityTracker(Node):
         angle = math.atan2(transformed_point.point.y, transformed_point.point.x)
         self.get_logger().info(f'Target {self.target_class} @ angle {math.degrees(angle):.1f}° -> position ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f}) in {self.source_frame}')
 
-        self.get_logger().debug(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
+        self.get_logger().info(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
         self.tf_broadcaster.sendTransform(transform)
         
 

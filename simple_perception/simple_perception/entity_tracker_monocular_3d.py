@@ -139,10 +139,16 @@ class EntityTrackerMonocular3D(Node):
         return SetParametersResult(successful=True)
 
     def set_target_class_callback(self, request, response):
-        """Service callback to set the target class."""
+        """Service callback to set the target class and enable/disable detection processing."""
         try:
             self.target_class = request.target_class
             self.get_logger().info(f'Target class changed via service to: {self.target_class}')
+            if self.target_class != "none":
+                self.enable_processing = True
+                self.get_logger().info('Detection processing ENABLED')
+            else:
+                self.enable_processing = False
+                self.get_logger().info('Detection processing DISABLED')
             response.success = True
             response.message = f'Target class successfully set to: {self.target_class}'
         except Exception as e:
@@ -170,13 +176,20 @@ class EntityTrackerMonocular3D(Node):
 
     def synchronized_callback(self, detection_msg: Detection2DArray, depth_msg: Image):
         """Handle synchronized detection and depth messages."""
-        
+
+        if not hasattr(self, 'enable_processing'):
+            self.enable_processing = False
+
+        if not self.enable_processing:
+            self.get_logger().debug('Detection processing DISABLED: target_class == "none" or not enabled.')
+            return
+
         self.get_logger().debug('Synchronized detection and depth messages received')
 
         if not self.configured:
             self.get_logger().warn('Camera info not yet received', throttle_duration_sec=2.0)
             return
-        
+
         # Convert depth image to numpy array
         try:
             # Depth image is 32FC1 (single channel float32)
@@ -185,7 +198,7 @@ class EntityTrackerMonocular3D(Node):
         except Exception as e:
             self.get_logger().error(f'Failed to convert depth image: {e}')
             return
-        
+
         if not detection_msg.detections:
             return
 

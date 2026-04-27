@@ -29,14 +29,16 @@ class EntityTracker(Node):
         self.declare_parameter('target_class', 'person')
         self.declare_parameter('source_frame', 'base_link')
         self.declare_parameter('target_frame', 'target')
-        
+
         self.target_class = self.get_parameter('target_class').value
         self.source_frame = self.get_parameter('source_frame').value
         self.target_frame = self.get_parameter('target_frame').value
         self.get_logger().info(f'Tracking target class: {self.target_class}')
-        
+
         # Add parameter callback to allow runtime changes
         self.add_on_set_parameters_callback(self.parameter_callback)
+
+        self.enable_processing = False
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -70,10 +72,16 @@ class EntityTracker(Node):
         return SetParametersResult(successful=True)
 
     def set_target_class_callback(self, request, response):
-        """Service callback to set the target class."""
+        """Service callback to set the target class and enable/disable detection processing."""
         try:
             self.target_class = request.target_class
             self.get_logger().info(f'Target class changed via service to: {self.target_class}')
+            if self.target_class != "none":
+                self.enable_processing = True
+                self.get_logger().info('Detection processing ENABLED')
+            else:
+                self.enable_processing = False
+                self.get_logger().info('Detection processing DISABLED')
             response.success = True
             response.message = f'Target class successfully set to: {self.target_class}'
         except Exception as e:
@@ -84,6 +92,13 @@ class EntityTracker(Node):
         return response
 
     def detection_callback(self, msg: Detection3DArray):
+        if not hasattr(self, 'enable_processing'):
+            self.enable_processing = False
+
+        if not self.enable_processing:
+            self.get_logger().debug('Detection processing DISABLED: target_class == "none" or not enabled.')
+            return
+
         if not msg.detections:
             return
 
@@ -101,6 +116,8 @@ class EntityTracker(Node):
         target_point.point.y = detection.bbox.center.position.y
         target_point.point.z = detection.bbox.center.position.z
 
+        self.get_logger().debug(f'Received detection for target class "{self.target_class}" at ({target_point.point.x:.2f}, {target_point.point.y:.2f}, {target_point.point.z:.2f}) in frame {target_point.header.frame_id}')
+
         detection_time = detection.header.stamp
         detection_frame = detection.header.frame_id
 
@@ -115,12 +132,14 @@ class EntityTracker(Node):
             )
 
             transformed_point = do_transform_point(target_point, source_2_detection)
+            self.get_logger().debug(f'Transformed point: ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f}) in {self.source_frame}')
         except Exception as e:
             self.get_logger().error(f'Transform error: {e}')
             return
 
         transform = TransformStamped()
-        transform.header.stamp = self.get_clock().now().to_msg()
+        transform.header.stamp = detection_time
+        # transform.header.stamp = self.get_clock().now().to_msg()
         transform.header.frame_id = self.source_frame
         transform.child_frame_id = self.target_frame
         transform.transform.translation.x = transformed_point.point.x
@@ -131,6 +150,7 @@ class EntityTracker(Node):
         transform.transform.rotation.z = 0.0
         transform.transform.rotation.w = 1.0
 
+        angle = math.atan2(transformed_point.point.y, transformed_point.point.x)
         self.get_logger().info(f'Target {self.target_class} @ angle {math.degrees(angle):.1f}° -> position ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f}) in {self.source_frame}')
 
         self.get_logger().debug(f'Publishing transform for target at ({transformed_point.point.x:.2f}, {transformed_point.point.y:.2f}, {transformed_point.point.z:.2f})')
