@@ -23,6 +23,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from ament_index_python import get_package_share_directory
 from launch.substitutions import PythonExpression
+from launch.conditions import IfCondition, UnlessCondition
 
 
 def generate_launch_description():
@@ -115,37 +116,36 @@ def generate_launch_description():
 
     optical_frame_arg = DeclareLaunchArgument(
         'optical_frame',
-        default_value='CameraTop_optical_frame',
+        default_value='camera_rgb_frame',
         description='Camera optical frame'
     )
 
     input_image_topic_arg = DeclareLaunchArgument(
         'input_image_topic',
-        default_value='/image_rgb',
+        default_value='/rgbd_camera/image',
         description='Input image topic for YOLO'
     )
 
     input_depth_topic_arg = DeclareLaunchArgument(
         'input_depth_topic',
-        default_value='/depth_anything/depth',
+        default_value='/rgbd_camera/depth_image',
         description='Input depth topic for YOLO'
     )
 
     input_depth_info_topic_arg = DeclareLaunchArgument(
         'input_depth_info_topic',
-        default_value='/camera_rgb_info',
+        default_value='/rgbd_camera/camera_info',
         description='Input depth info topic for YOLO'
     )
 
     camera_frame_arg = DeclareLaunchArgument(
         'camera_frame',
-        default_value='CameraTop_frame',
+        default_value='camera_rgb_frame',
         description='Camera frame for YOLO'
     )
 
     
-    # --- Node: Entity tracker ---
-    # Tracks entities using Detection3DArray input
+    # --- Node: Entity tracker (real and fake 3D) ---
     entity_tracker_node = Node(
         package='simple_perception',
         executable='entity_tracker',
@@ -158,7 +158,26 @@ def generate_launch_description():
         }],
         remappings=[
             ('input_detection_3d', LaunchConfiguration('detection_3d_topic')),
-        ]
+        ],
+        condition=UnlessCondition(LaunchConfiguration('fake_3d'))
+    )
+
+    entity_tracker_fake_3d_node = Node(
+        package='simple_perception',
+        executable='entity_tracker_fake_3d',
+        name='entity_tracker_fake_3d_node',
+        output='screen',
+        parameters=[{
+            'target_class': LaunchConfiguration('target_class'),
+            'source_frame': LaunchConfiguration('source_frame'),
+            'target_frame': LaunchConfiguration('target_frame'),
+            'optical_frame': LaunchConfiguration('optical_frame'),
+        }],
+        remappings=[
+            ('input_detection_2d', '/detections_2d'),
+            ('camera_info', LaunchConfiguration('input_depth_info_topic')),
+        ],
+        condition=IfCondition(LaunchConfiguration('fake_3d'))
     )
 
     # --- Node: YOLO to standard converter ---
@@ -191,7 +210,7 @@ def generate_launch_description():
             'input_depth_topic': LaunchConfiguration('input_depth_topic'),
             'input_depth_info_topic': LaunchConfiguration('input_depth_info_topic'),
             'target_frame': LaunchConfiguration('camera_frame'),
-            'use_3d': 'True', # Set to False when using custom 3D processing
+            'use_3d': 'False', # Set to False when using custom 3D processing
             'depth_image_reliability': '1', # Set to 2 when monocular depth is used
         }.items()
     )
@@ -216,6 +235,7 @@ def generate_launch_description():
 
         # Nodes
         entity_tracker_node,
+        entity_tracker_fake_3d_node,
         yolo_to_standard_node,
         yolo_launch,
     ])
